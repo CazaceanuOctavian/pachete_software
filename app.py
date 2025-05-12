@@ -111,8 +111,8 @@ if df_smartphone_normalised is not None:
             price_range = (0, 10000)  # Default values if price column doesn't exist
         
         # Filter by brand if available
-        if 'Marca' in df_smartphone_normalised.columns:
-            all_brands = df_smartphone_normalised['Marca'].dropna().unique().tolist()
+        if 'manufacturer' in df_smartphone_normalised.columns:
+            all_brands = df_smartphone_normalised['manufacturer'].dropna().unique().tolist()
             selected_brands = st.multiselect("Brands", all_brands, default=all_brands[:5] if len(all_brands) > 5 else all_brands)
         else:
             selected_brands = []
@@ -124,8 +124,8 @@ if df_smartphone_normalised is not None:
             filtered_df = filtered_df[(filtered_df['price'] >= price_range[0]) & 
                                        (filtered_df['price'] <= price_range[1])]
         
-        if selected_brands and 'Marca' in filtered_df.columns:
-            filtered_df = filtered_df[filtered_df['Marca'].isin(selected_brands)]
+        if selected_brands and 'manufacturer' in filtered_df.columns:
+            filtered_df = filtered_df[filtered_df['manufacturer'].isin(selected_brands)]
             
         st.write(f"Filtered smartphones: {len(filtered_df):,}")
         
@@ -203,30 +203,31 @@ if df_smartphone_normalised is not None:
                 st.plotly_chart(fig, use_container_width=True)
             
             # Price by brand if brand column exists
-            if 'Marca' in filtered_df.columns:
+            if 'manufacturer' in filtered_df.columns:
                 st.subheader("Price by Brand")
                 
                 # Get top N brands by count
                 top_n = st.slider("Number of brands to display", 5, 20, 10)
-                top_brands = filtered_df['Marca'].value_counts().nlargest(top_n).index.tolist()
+                top_brands = filtered_df['manufacturer'].value_counts().nlargest(top_n).index.tolist()
                 
-                brand_df = filtered_df[filtered_df['Marca'].isin(top_brands)]
+                brand_df = filtered_df[filtered_df['manufacturer'].isin(top_brands)]
                 
                 fig = px.box(
                     brand_df,
-                    x='Marca',
+                    x='manufacturer',
                     y='price',
                     title=f"Price Distribution by Top {top_n} Brands",
-                    labels={'price': 'Price (RON)', 'Marca': 'Brand'},
-                    color='Marca',
+                    labels={'price': 'Price (RON)', 'manufacturer': 'Brand'},
+                    color='manufacturer',
                     color_discrete_sequence=px.colors.qualitative.Plotly
                 )
                 st.plotly_chart(fig, use_container_width=True)
                 
                 # Price statistics by brand
-                price_by_brand = filtered_df.groupby('Marca')['price'].agg(['count', 'mean', 'median', 'min', 'max']).reset_index()
+                price_by_brand = filtered_df.groupby('manufacturer')['price'].agg(['count', 'mean', 'median', 'min', 'max']).reset_index()
                 price_by_brand = price_by_brand.sort_values('count', ascending=False).head(top_n)
                 price_by_brand = price_by_brand.rename(columns={
+                    'manufacturer': 'Brand',
                     'count': 'Count', 
                     'mean': 'Average Price', 
                     'median': 'Median Price',
@@ -286,8 +287,8 @@ if df_smartphone_normalised is not None:
                     with col2:
                         y_feature = st.selectbox("Y-axis feature", selected_cols, index=min(1, len(selected_cols)-1))
                     with col3:
-                        if 'Marca' in filtered_df.columns:
-                            color_by = st.selectbox("Color by", ["None", "Marca"], index=1)
+                        if 'manufacturer' in filtered_df.columns:
+                            color_by = st.selectbox("Color by", ["None", "manufacturer"], index=1)
                         else:
                             color_by = "None"
                     
@@ -323,7 +324,7 @@ if df_smartphone_normalised is not None:
     with tab4:
         st.header("Brand Analysis")
         
-        if 'Marca' in filtered_df.columns:
+        if 'manufacturer' in filtered_df.columns:
             col1, col2 = st.columns(2)
             
             with col1:
@@ -331,7 +332,7 @@ if df_smartphone_normalised is not None:
                 
                 # Get top N brands
                 top_n = st.slider("Number of top brands to display", 5, 20, 10, key="brand_dist_slider")
-                brand_counts = filtered_df['Marca'].value_counts().nlargest(top_n)
+                brand_counts = filtered_df['manufacturer'].value_counts().nlargest(top_n)
                 
                 fig = px.bar(
                     x=brand_counts.index,
@@ -359,17 +360,17 @@ if df_smartphone_normalised is not None:
             
             # Get categorical columns that might be interesting
             cat_cols = [col for col in filtered_df.columns if filtered_df[col].dtype == 'object' 
-                       and col != 'Marca' and filtered_df[col].nunique() < 20]
+                       and col != 'manufacturer' and filtered_df[col].nunique() < 20]
             
             if cat_cols:
                 selected_feature = st.selectbox("Select feature", cat_cols)
                 
                 # Get top brands
-                top_brands = filtered_df['Marca'].value_counts().nlargest(8).index.tolist()
-                brand_filtered_df = filtered_df[filtered_df['Marca'].isin(top_brands)]
+                top_brands = filtered_df['manufacturer'].value_counts().nlargest(8).index.tolist()
+                brand_filtered_df = filtered_df[filtered_df['manufacturer'].isin(top_brands)]
                 
                 # Group by brand and selected feature
-                feature_dist = pd.crosstab(brand_filtered_df['Marca'], brand_filtered_df[selected_feature])
+                feature_dist = pd.crosstab(brand_filtered_df['manufacturer'], brand_filtered_df[selected_feature])
                 
                 # Convert to percentage
                 feature_dist_pct = feature_dist.div(feature_dist.sum(axis=1), axis=0) * 100
