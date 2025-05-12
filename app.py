@@ -5,9 +5,11 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 import plotly.express as px
 from pandas import json_normalize
-from sklearn.ensemble import RandomForestRegressor
 from sklearn.model_selection import train_test_split
 from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
+
+# Import XGBoost for regression
+import xgboost as xgb
 
 # Set page configuration
 st.set_page_config(
@@ -397,27 +399,84 @@ if df_smartphone_normalised is not None:
         st.header("Price Prediction Model")
         
         if 'price' in filtered_df.columns:
-            st.subheader("Train a Random Forest Regressor to predict smartphone prices")
+            st.subheader("Train an XGBoost Regressor to predict smartphone prices")
             
-            # Get numeric columns for prediction
-            numeric_cols = filtered_df.select_dtypes(include=['number']).columns.tolist()
+            # Preprocessing steps for model training
+            df_model_training = pd.DataFrame()
             
-            # Remove price from features
-            if 'price' in numeric_cols:
-                numeric_cols.remove('price')
+            # Process 5G and 4G fields
+            if '5G' in filtered_df.columns:
+                df_model_training['5G'] = filtered_df['5G'].fillna(0)
+                df_model_training['5G'] = df_model_training['5G'].replace('Da', 1).replace('Nu', 0)
             
-            if len(numeric_cols) > 0:
-                # Allow user to select features
+            if '4G' in filtered_df.columns:
+                df_model_training['4G'] = filtered_df['4G'].fillna(0)
+                df_model_training['4G'] = df_model_training['4G'].replace('Da', 1).replace('Nu', 0)
+            
+            # Process resolution
+            if 'Rezolutie maxima (px)' in filtered_df.columns:
+                try:
+                    df_model_training[['resolution width', 'resolution height']] = filtered_df['Rezolutie maxima (px)'].str.split(' x ', expand=True)
+                    df_model_training['resolution width'] = pd.to_numeric(df_model_training['resolution width'], errors='coerce').fillna(0)
+                    df_model_training['resolution height'] = pd.to_numeric(df_model_training['resolution height'], errors='coerce').fillna(0)
+                except:
+                    st.warning("Could not parse resolution data properly. Using default values.")
+                    df_model_training['resolution width'] = 0
+                    df_model_training['resolution height'] = 0
+            
+            # Process screen size
+            if 'Diagonala (inch)' in filtered_df.columns:
+                df_model_training['Diagonala'] = pd.to_numeric(filtered_df['Diagonala (inch)'], errors='coerce').fillna(0)
+            
+            # Process CPU cores
+            if 'Numar nuclee' in filtered_df.columns:
+                df_model_training['Numar nuclee'] = filtered_df['Numar nuclee'].astype(str).str.split('(').str[0]
+                df_model_training['Numar nuclee'] = pd.to_numeric(df_model_training['Numar nuclee'], errors='coerce').fillna(0)
+            
+            # Process RAM and Flash memory
+            if 'Memorie RAM' in filtered_df.columns:
+                df_model_training['Memorie RAM'] = filtered_df['Memorie RAM'].astype(str).str.split(' ').str[0]
+                df_model_training['Memorie RAM'] = pd.to_numeric(df_model_training['Memorie RAM'], errors='coerce').fillna(0)
+            
+            if 'Memorie Flash' in filtered_df.columns:
+                df_model_training['Memorie Flash'] = filtered_df['Memorie Flash'].astype(str).str.split(' ').str[0]
+                df_model_training['Memorie Flash'] = pd.to_numeric(df_model_training['Memorie Flash'], errors='coerce').fillna(0)
+            
+            # Process wireless charging
+            if 'Incarcare Wireless' in filtered_df.columns:
+                df_model_training['Incarcare Wireless'] = filtered_df['Incarcare Wireless'].fillna(0)
+                df_model_training['Incarcare Wireless'] = df_model_training['Incarcare Wireless'].replace('Da', 1).replace('Nu', 0)
+            
+            # Process battery capacity
+            if 'Capacitate' in filtered_df.columns:
+                df_model_training['Capacitate Baterie'] = filtered_df['Capacitate'].astype(str).str.split(' ').str[0]
+                df_model_training['Capacitate Baterie'] = pd.to_numeric(df_model_training['Capacitate Baterie'], errors='coerce').fillna(0)
+            
+            # Process Dual SIM
+            if 'Dual SIM' in filtered_df.columns:
+                df_model_training['Dual SIM'] = filtered_df['Dual SIM'].fillna(0)
+                df_model_training['Dual SIM'] = df_model_training['Dual SIM'].replace('Da', 1).replace('Nu', 0)
+            
+            # Add price column
+            df_model_training['price'] = filtered_df['price']
+            
+            # Display available features
+            available_features = list(df_model_training.columns)
+            if 'price' in available_features:
+                available_features.remove('price')
+            
+            if len(available_features) > 0:
+                # Let user select features
                 selected_features = st.multiselect(
                     "Select features for price prediction", 
-                    numeric_cols,
-                    default=numeric_cols[:min(5, len(numeric_cols))]
+                    available_features,
+                    default=available_features[:min(5, len(available_features))]
                 )
                 
                 if selected_features:
-                    # Split data into features and target
-                    X = filtered_df[selected_features].copy()
-                    y = filtered_df['price']
+                    # Split data
+                    X = df_model_training[selected_features].copy()
+                    y = df_model_training['price']
                     
                     # Handle missing values
                     X = X.fillna(X.median())
@@ -430,139 +489,148 @@ if df_smartphone_normalised is not None:
                         X, y, test_size=test_size, random_state=random_state
                     )
                     
-                    # Model parameters
-                    n_estimators = st.slider("Number of trees", 10, 200, 100)
-                    max_depth = st.slider("Maximum tree depth", 2, 20, 10)
+                    # XGBoost parameters
+                    col1, col2, col3 = st.columns(3)
+                    with col1:
+                        n_estimators = st.slider("Number of trees", 10, 200, 100)
+                    with col2:
+                        max_depth = st.slider("Maximum tree depth", 2, 20, 6)
+                    with col3:
+                        learning_rate = st.slider("Learning rate", 0.01, 0.3, 0.1, step=0.01)
                     
                     # Train button
                     if st.button("Train Model"):
-                        with st.spinner("Training model..."):
-                            # Train model
-                            model = RandomForestRegressor(
-                                n_estimators=n_estimators,
-                                max_depth=max_depth,
-                                random_state=random_state
-                            )
-                            model.fit(X_train, y_train)
-                            
-                            # Make predictions
-                            train_preds = model.predict(X_train)
-                            test_preds = model.predict(X_test)
-                            
-                            # Calculate metrics
-                            train_r2 = r2_score(y_train, train_preds)
-                            test_r2 = r2_score(y_test, test_preds)
-                            
-                            train_mae = mean_absolute_error(y_train, train_preds)
-                            test_mae = mean_absolute_error(y_test, test_preds)
-                            
-                            train_rmse = np.sqrt(mean_squared_error(y_train, train_preds))
-                            test_rmse = np.sqrt(mean_squared_error(y_test, test_preds))
-                            
-                            # Display metrics
-                            col1, col2 = st.columns(2)
-                            
-                            with col1:
-                                st.subheader("Model Performance")
-                                metrics_df = pd.DataFrame({
-                                    'Metric': ['R² Score', 'MAE', 'RMSE'],
-                                    'Training Set': [train_r2, train_mae, train_rmse],
-                                    'Testing Set': [test_r2, test_mae, test_rmse]
-                                })
-                                
-                                # Format metrics
-                                metrics_df['Training Set'] = metrics_df['Training Set'].round(3)
-                                metrics_df['Testing Set'] = metrics_df['Testing Set'].round(3)
-                                
-                                st.dataframe(metrics_df, use_container_width=True)
-                            
-                            with col2:
-                                st.subheader("Feature Importance")
-                                
-                                # Get feature importance
-                                importance = model.feature_importances_
-                                
-                                # Create DataFrame for feature importance
-                                importance_df = pd.DataFrame({
-                                    'Feature': selected_features,
-                                    'Importance': importance
-                                })
-                                importance_df = importance_df.sort_values('Importance', ascending=False)
-                                
-                                # Plot feature importance
-                                fig = px.bar(
-                                    importance_df,
-                                    x='Importance',
-                                    y='Feature',
-                                    orientation='h',
-                                    title="Feature Importance",
-                                    color='Importance',
-                                    color_continuous_scale='Viridis'
+                        with st.spinner("Training XGBoost model..."):
+                            try:
+                                # Train model
+                                xgb_model = xgb.XGBRegressor(
+                                    n_estimators=n_estimators,
+                                    max_depth=max_depth,
+                                    learning_rate=learning_rate,
+                                    random_state=random_state
                                 )
+                                xgb_model.fit(X_train, y_train)
+                                
+                                # Make predictions
+                                train_preds = xgb_model.predict(X_train)
+                                test_preds = xgb_model.predict(X_test)
+                                
+                                # Calculate metrics
+                                train_r2 = r2_score(y_train, train_preds)
+                                test_r2 = r2_score(y_test, test_preds)
+                                
+                                train_mae = mean_absolute_error(y_train, train_preds)
+                                test_mae = mean_absolute_error(y_test, test_preds)
+                                
+                                train_rmse = np.sqrt(mean_squared_error(y_train, train_preds))
+                                test_rmse = np.sqrt(mean_squared_error(y_test, test_preds))
+                                
+                                # Display metrics
+                                col1, col2 = st.columns(2)
+                                
+                                with col1:
+                                    st.subheader("Model Performance")
+                                    metrics_df = pd.DataFrame({
+                                        'Metric': ['R² Score', 'MAE', 'RMSE'],
+                                        'Training Set': [train_r2, train_mae, train_rmse],
+                                        'Testing Set': [test_r2, test_mae, test_rmse]
+                                    })
+                                    
+                                    # Format metrics
+                                    metrics_df['Training Set'] = metrics_df['Training Set'].round(3)
+                                    metrics_df['Testing Set'] = metrics_df['Testing Set'].round(3)
+                                    
+                                    st.dataframe(metrics_df, use_container_width=True)
+                                
+                                with col2:
+                                    st.subheader("Feature Importance")
+                                    
+                                    # Get feature importance
+                                    importance = xgb_model.feature_importances_
+                                    
+                                    # Create DataFrame for feature importance
+                                    importance_df = pd.DataFrame({
+                                        'Feature': selected_features,
+                                        'Importance': importance
+                                    })
+                                    importance_df = importance_df.sort_values('Importance', ascending=False)
+                                    
+                                    # Plot feature importance
+                                    fig = px.bar(
+                                        importance_df,
+                                        x='Importance',
+                                        y='Feature',
+                                        orientation='h',
+                                        title="Feature Importance",
+                                        color='Importance',
+                                        color_continuous_scale='Viridis'
+                                    )
+                                    st.plotly_chart(fig, use_container_width=True)
+                                
+                                # Prediction vs Actual plot
+                                st.subheader("Predicted vs Actual Prices")
+                                
+                                # Create DataFrame for prediction results
+                                results_df = pd.DataFrame({
+                                    'Actual': y_test,
+                                    'Predicted': test_preds
+                                })
+                                
+                                # Plot
+                                fig = px.scatter(
+                                    results_df,
+                                    x='Actual',
+                                    y='Predicted',
+                                    title="Predicted vs Actual Prices",
+                                    labels={'Actual': 'Actual Price (RON)', 'Predicted': 'Predicted Price (RON)'},
+                                    opacity=0.7
+                                )
+                                
+                                # Add perfect prediction line
+                                min_val = min(results_df['Actual'].min(), results_df['Predicted'].min())
+                                max_val = max(results_df['Actual'].max(), results_df['Predicted'].max())
+                                fig.add_shape(
+                                    type="line", line=dict(dash="dash", color="gray"),
+                                    x0=min_val, y0=min_val, x1=max_val, y1=max_val
+                                )
+                                
                                 st.plotly_chart(fig, use_container_width=True)
-                            
-                            # Prediction vs Actual plot
-                            st.subheader("Predicted vs Actual Prices")
-                            
-                            # Create DataFrame for prediction results
-                            results_df = pd.DataFrame({
-                                'Actual': y_test,
-                                'Predicted': test_preds
-                            })
-                            
-                            # Plot
-                            fig = px.scatter(
-                                results_df,
-                                x='Actual',
-                                y='Predicted',
-                                title="Predicted vs Actual Prices",
-                                labels={'Actual': 'Actual Price', 'Predicted': 'Predicted Price'},
-                                opacity=0.7
-                            )
-                            
-                            # Add perfect prediction line
-                            min_val = min(results_df['Actual'].min(), results_df['Predicted'].min())
-                            max_val = max(results_df['Actual'].max(), results_df['Predicted'].max())
-                            fig.add_shape(
-                                type="line", line=dict(dash="dash", color="gray"),
-                                x0=min_val, y0=min_val, x1=max_val, y1=max_val
-                            )
-                            
-                            st.plotly_chart(fig, use_container_width=True)
-                            
-                            # Interactive price prediction
-                            st.subheader("Try the Model")
-                            st.write("Adjust the feature values to see the predicted price")
-                            
-                            # Create input sliders for each feature
-                            input_values = {}
-                            for feature in selected_features:
-                                min_val = float(filtered_df[feature].min())
-                                max_val = float(filtered_df[feature].max())
-                                mean_val = float(filtered_df[feature].mean())
                                 
-                                step = (max_val - min_val) / 100
-                                step = max(step, 0.01)  # Minimum step of 0.01
+                                # Interactive price prediction
+                                st.subheader("Try the Model")
+                                st.write("Adjust the feature values to see the predicted price")
                                 
-                                input_values[feature] = st.slider(
-                                    f"{feature}",
-                                    min_val,
-                                    max_val,
-                                    mean_val,
-                                    step=step
-                                )
-                            
-                            # Make prediction
-                            input_df = pd.DataFrame([input_values])
-                            prediction = model.predict(input_df)[0]
-                            
-                            # Display prediction
-                            st.markdown(f"### Predicted Price: **{prediction:.2f} RON**")
-                    
+                                # Create input sliders for each feature
+                                input_values = {}
+                                for feature in selected_features:
+                                    min_val = float(X[feature].min())
+                                    max_val = float(X[feature].max())
+                                    mean_val = float(X[feature].mean())
+                                    
+                                    step = (max_val - min_val) / 100
+                                    step = max(step, 0.01)  # Minimum step of 0.01
+                                    
+                                    input_values[feature] = st.slider(
+                                        f"{feature}",
+                                        min_val,
+                                        max_val,
+                                        mean_val,
+                                        step=step
+                                    )
+                                
+                                # Make prediction
+                                input_df = pd.DataFrame([input_values])
+                                prediction = xgb_model.predict(input_df)[0]
+                                
+                                # Display prediction
+                                st.markdown(f"### Predicted Price: **{prediction:.2f} RON**")
+                                
+                            except Exception as e:
+                                st.error(f"Error training the model: {str(e)}")
                 else:
                     st.info("Please select at least one feature for prediction")
             else:
-                st.info("No numeric features available for prediction")
+                st.info("No features available for prediction")
         else:
             st.info("Price column not found in the dataset")
 else:
